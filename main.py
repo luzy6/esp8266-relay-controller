@@ -15,7 +15,7 @@ class Run:
   def __init__(self):
     self.s = self.initSocket()
     self.poller = self.initSelect(self.s)
-    self.io_out = Pin(2, Pin.OPEN_DRAIN, 1)
+    self.io_out = Pin(2, Pin.OPEN_DRAIN, 0)
     self.io_in = Pin(3, Pin.IN, Pin.PULL_UP)
     self.state = False
     self.counts = 0
@@ -89,4 +89,5 @@ if __name__ == "__main__":
   finally:
     run.close()
     print('close')
+
 
