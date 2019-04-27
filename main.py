@@ -1,6 +1,6 @@
 import socket
 import time
-from machine import Pin
+import gpio
 from boot import connector
 import select
 import ntptime
@@ -12,96 +12,143 @@ import ntptime
 
 # p0.irq(trigger=Pin.IRQ_RISING | Pin.IRQ_FALLING, handler=callback)
 
-class Run:
+ON = 'on'
+OFF = 'off'
+SWITCH = 'switch'
+
+class SysTime:
   def __init__(self):
     ntptime.NTP_DELTA = 3155673600 - 3600*8 # UTC/GMT+08:0
-    self.s = self.initSocket()
-    self.poller = self.initSelect(self.s)
-    self.io_out = Pin(2, Pin.OPEN_DRAIN)
-    self.io_in = Pin(3, Pin.IN, Pin.PULL_UP)
-    #self.io_in = Pin(0, Pin.IN, Pin.PULL_UP)
-    self.state = False
-    self.real_time_is_set = False
-    self.counts = 0
-    self.value_input = self.io_in.value()
-    self.offPin()
+    self._is_init = False
+
+  def isInit(self):
+    return self._is_init
     
-  def initSocket(self):
-    addr = socket.getaddrinfo('127.0.0.1', 2041)[0][-1]
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.bind(addr)
-    s.settimeout(0)
-    print('{}:  client connected from '.format(self.time()), addr)
-    return s
-    
-  def initSelect(self, s):
-    poller = select.poll()
-    poller.register(s, select.POLLIN)
-    return poller
-    
-  def setRealTime(self):
+  def init(self):
     try:
       ntptime.settime()
       now = time.localtime()
       if now[0] > 2000:
-        self.real_time_is_set = True
+        self._is_init = True
     except:
       pass
-  
-  def time(self):
+
+  def now(self):
     return time.localtime()[:6]
-  
-  def reversePin(self):
-    if self.state:
-      self.offPin()
+
+sys_time = SysTime()
+sys_time.init()
+
+class NetProcessor:
+  def __init__(self):
+    self._str_on = b'0'
+    self._str_off = b'1'
+    self._str_switch = b'2'
+
+    self.s = self._initSocket()
+    self.poller = self._initSelect(self.s)
+    
+  def _initSocket(self):
+    addr = socket.getaddrinfo('127.0.0.1', 2041)[0][-1]
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.bind(addr)
+    s.settimeout(0)
+    print('{}:  client connected from '.format(sys_time.now()), addr)
+    return s
+    
+  def _initSelect(self, s):
+    poller = select.poll()
+    poller.register(s, select.POLLIN)
+    return poller
+
+  def process(self):
+    res = self.poller.poll(10)
+    if res:
+      data, addr = self.s.recvfrom(1024)
+      print('{}:  recv '.format(sys_time.now()), data)
+      if data == self._str_on:
+        return ON
+      elif data == self._str_off:
+        return OFF
+      elif data == self._str_switch:
+        return SWITCH
+      else:
+        return None
     else:
-      self.onPin()
+      return None
     
-  def offPin(self):
-    self.io_out.off()
-    self.state = False
-    print('{}:  close output io'.format(self.time()))
+  def close(self):
+    self.s.close()
+
+class KeyProcessor:
+  def __init__(self, pin=3):
+    self.key = gpio.IOIn(pin)
+    self._counts = 0
+    self._key_state = self.key.value()
     
-  def onPin(self):
-    self.io_out.on()
-    self.state = True
-    print('{}:  open output io'.format(self.time()))
-  
-  def pinChange(self):
-    v = self.io_in.value()
-    if v == self.value_input:
-      self.counts = 0
+  def _pinChange(self):
+    v = self.key.value()
+    if v == self._key_state:
+      self._counts = 0
       return False
     else:
-      self.counts += 1
-      print('{}:  input pin is triggered {}!'.format(self.time(), self.counts))
-    if self.counts > 10:
-      self.value_input = v
-      self.counts = 0
-      print('{}:  input pin is changed!'.format(self.time()))
+      self._counts += 1
+      print('{}:  input pin is triggered {}!'.format(sys_time.now(), self._counts))
+    if self._counts > 10:
+      self._key_state = v
+      self._counts = 0
+      print('{}:  input pin is changed!'.format(sys_time.now()))
       return True
     else:
       return False
 
+  def process(self):
+    if self._pinChange():
+      return SWITCH
+    else:
+      return None
+
+class Run:
+  def __init__(self):
+    self.lamp = gpio.IOOut(2)
+    self.key_processor = KeyProcessor()
+    #self.key_processor = KeyProcessor(0)
+    self.net_processor = NetProcessor()
+    
+  def reverseLamp(self):
+    if self.lamp.isOn():
+      self.offLamp()
+    else:
+      self.onLamp()
+      
+  def onLamp(self):
+    self.lamp.on()
+    print('{}:  open lamp'.format(sys_time.now()))
+      
+  def offLamp(self):
+    self.lamp.off()
+    print('{}:  close lamp'.format(sys_time.now()))
+      
+  def handle(self, res):
+    if res == ON:
+      self.onLamp()
+    elif res == OFF:
+      self.offLamp()
+    elif res == SWITCH:
+      self.reverseLamp()
+    
   def loop(self):
+    print('{}:  start loop!!!'.format(sys_time.now()))
     while True:
-      if not self.real_time_is_set:
-        self.setRealTime()
-      res = self.poller.poll(10)
-      if res:
-        data, addr = self.s.recvfrom(1024)
-        print('{}:  recv '.format(self.time()), data)
-        if data == b'0':
-          self.onPin()
-        elif data == b'1':
-          self.offPin()
-        elif data == b'2':
-          self.reversePin()
-      if self.pinChange():
-        self.reversePin()
-        
+      if not sys_time.isInit():
+        sys_time.init()
+      res = self.net_processor.process()
+      self.handle(res)
+      res = self.key_processor.process()
+      self.handle(res)
+      
   def close(self):
-    self.s.close()
+    self.net_processor.close()
         
 if __name__ == "__main__":
   run = Run()
@@ -109,5 +156,5 @@ if __name__ == "__main__":
     run.loop()
   finally:
     run.close()
-    print('{}:  close!!!'.format(run.time()))
+    print('{}:  close!!!'.format(sys_time.now()))
 
