@@ -1,13 +1,11 @@
-
 # This file is executed on every boot (including wake-boot from deepsleep)
 
 #import esp
 #esp.osdebug(None)
 
 import gc
-# import webrepl
+import webrepl
 import network
-
 
 class Connector:
   def __init__(self):
@@ -40,7 +38,7 @@ class Connector:
 connector = Connector()
 connector.connect()
 
-# webrepl.start()
+webrepl.start()
 
 gc.collect()
 
