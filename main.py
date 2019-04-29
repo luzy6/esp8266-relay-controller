@@ -51,8 +51,8 @@ class NetProcessor:
   def _initSocket(self):
     addr = socket.getaddrinfo('127.0.0.1', 2041)[0][-1]
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.bind(addr)
     s.settimeout(0)
+    s.bind(addr)
     print('{}:  client connected from '.format(sys_time.now()), addr)
     return s
     
@@ -140,8 +140,6 @@ class Run:
   def loop(self):
     print('{}:  start loop!!!'.format(sys_time.now()))
     while True:
-      if not sys_time.isInit():
-        sys_time.init()
       res = self.net_processor.process()
       self.handle(res)
       res = self.key_processor.process()
