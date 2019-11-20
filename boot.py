@@ -30,7 +30,7 @@ class Connector:
   def doConnect(self):
     if not self.sta_if.isconnected():
         print('connecting to network...')
-        self.sta_if.connect('@PHICOMM_40', '20405lzy')
+        self.sta_if.connect(self.ssid, self.password)
         while not self.sta_if.isconnected():
             pass
     print('network config:', self.sta_if.ifconfig())
