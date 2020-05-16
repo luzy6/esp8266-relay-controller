@@ -1,0 +1,2 @@
+SSID = 'gk'
+PASSWORD = 'masterlzy'

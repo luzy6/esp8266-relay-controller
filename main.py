@@ -1,7 +1,8 @@
 import socket
 import time
+import gc
 import gpio
-from boot import connector
+from boot import connector, access_point
 import select
 import ntptime
 #import micropython
@@ -38,6 +39,7 @@ class SysTime:
 
 sys_time = SysTime()
 sys_time.init()
+gc.collect()
 
 class NetProcessor:
   def __init__(self):
@@ -85,19 +87,22 @@ class KeyProcessor:
     self.key = gpio.IOIn(pin)
     self._counts = 0
     self._key_state = self.key.value()
-    
+    self.start = 0
+  
   def _pinChange(self):
     v = self.key.value()
     if v == self._key_state:
       self._counts = 0
+      self.start = time.ticks_us()
       return False
     else:
       self._counts += 1
       print('{}:  input pin is triggered {}!'.format(sys_time.now(), self._counts))
-    if self._counts > 10:
+    if self._counts > 10: # level changed time > 190ms
       self._key_state = v
       self._counts = 0
-      print('{}:  input pin is changed!'.format(sys_time.now()))
+      print('{}: input pin is changed! time spent: {}'.format(
+        sys_time.now(), time.ticks_diff(time.ticks_us(), self.start)/1000))
       return True
     else:
       return False
@@ -114,6 +119,7 @@ class Run:
     self.key_processor = KeyProcessor()
     #self.key_processor = KeyProcessor(0)
     self.net_processor = NetProcessor()
+    self.t = 0
     
   def reverseLamp(self):
     if self.lamp.isOn():
@@ -137,17 +143,29 @@ class Run:
     elif res == SWITCH:
       self.reverseLamp()
     
+  @micropython.native
   def loop(self):
     print('{}:  start loop!!!'.format(sys_time.now()))
+    times = 0
     while True:
       res = self.net_processor.process()
       self.handle(res)
       res = self.key_processor.process()
       self.handle(res)
+      # if times == 0:
+      #   self.t = time.ticks_ms()
+      times += 1
+      if times > 1000: # check connector Connection per 10s
+        # print('check connector time: {}s'.format(time.ticks_diff(time.ticks_ms(), self.t)/1000))
+        if connector.isConnect():
+          access_point.inactive()
+        else:
+          access_point.active()
+        times = 0
       
   def close(self):
     self.net_processor.close()
-        
+    
 if __name__ == "__main__":
   run = Run()
   try:
@@ -155,4 +173,3 @@ if __name__ == "__main__":
   finally:
     run.close()
     print('{}:  close!!!'.format(sys_time.now()))
-
