@@ -1,10 +1,7 @@
 import socket
 import time
-import gc
 import gpio
-from boot import connector, access_point
 import select
-import ntptime
 #import micropython
 #micropython.alloc_emergency_exception_buf(100)
 # sta_if.ifconfig(('192.168.2.173', '255.255.255.0', '192.168.2.1', '8.8.8.8'))
@@ -17,30 +14,6 @@ ON = 'on'
 OFF = 'off'
 SWITCH = 'switch'
 
-class SysTime:
-  def __init__(self):
-    ntptime.NTP_DELTA = 3155673600 - 3600*8 # UTC/GMT+08:0
-    self._is_init = False
-
-  def isInit(self):
-    return self._is_init
-    
-  def init(self):
-    try:
-      ntptime.settime()
-      now = time.localtime()
-      if now[0] > 2000:
-        self._is_init = True
-    except:
-      pass
-
-  def now(self):
-    return time.localtime()[:6]
-
-sys_time = SysTime()
-sys_time.init()
-gc.collect()
-
 class NetProcessor:
   def __init__(self):
     self._str_on = b'0'
@@ -51,8 +24,9 @@ class NetProcessor:
     self.poller = self._initSelect(self.s)
     
   def _initSocket(self):
-    addr = socket.getaddrinfo('127.0.0.1', 2041)[0][-1]
+    addr = socket.getaddrinfo('', 2041)[0][-1]
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
     s.settimeout(0)
     s.bind(addr)
     print('{}:  client connected from '.format(sys_time.now()), addr)
@@ -112,36 +86,40 @@ class KeyProcessor:
       return SWITCH
     else:
       return None
-
+      
+class Lamp:
+  def __init__(self, io=2):
+    self.lamp = gpio.IOOut(io)
+    
+  def on(self):
+    self.lamp.on()
+    print('{}:  open lamp'.format(sys_time.now()))
+    
+  def off(self):
+    self.lamp.off()
+    print('{}:  close lamp'.format(sys_time.now()))
+    
+  def reverse(self):
+    if self.lamp.isOn():
+      self.off()
+    else:
+      self.on()
+      
 class Run:
   def __init__(self):
-    self.lamp = gpio.IOOut(2)
     self.key_processor = KeyProcessor()
     #self.key_processor = KeyProcessor(0)
     self.net_processor = NetProcessor()
-    self.t = 0
+    self.lamp = Lamp()
     
-  def reverseLamp(self):
-    if self.lamp.isOn():
-      self.offLamp()
-    else:
-      self.onLamp()
-      
-  def onLamp(self):
-    self.lamp.on()
-    print('{}:  open lamp'.format(sys_time.now()))
-      
-  def offLamp(self):
-    self.lamp.off()
-    print('{}:  close lamp'.format(sys_time.now()))
-      
-  def handle(self, res):
+  def handle(self, cmd):
+    cmd_list = cmd.strip().split()
     if res == ON:
-      self.onLamp()
+      self.lamp.on()
     elif res == OFF:
-      self.offLamp()
+      self.lamp.off()
     elif res == SWITCH:
-      self.reverseLamp()
+      self.lamp.reverse()
     
   @micropython.native
   def loop(self):
@@ -152,16 +130,6 @@ class Run:
       self.handle(res)
       res = self.key_processor.process()
       self.handle(res)
-      # if times == 0:
-      #   self.t = time.ticks_ms()
-      times += 1
-      if times > 1000: # check connector Connection per 10s
-        # print('check connector time: {}s'.format(time.ticks_diff(time.ticks_ms(), self.t)/1000))
-        if connector.isConnect():
-          access_point.inactive()
-        else:
-          access_point.active()
-        times = 0
       
   def close(self):
     self.net_processor.close()
@@ -173,3 +141,4 @@ if __name__ == "__main__":
   finally:
     run.close()
     print('{}:  close!!!'.format(sys_time.now()))
+
